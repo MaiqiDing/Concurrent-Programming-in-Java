@@ -1,13 +1,12 @@
 package edu.coursera.concurrent;
 
-import edu.coursera.concurrent.AbstractBoruvka;
-import edu.coursera.concurrent.SolutionToBoruvka;
-import edu.coursera.concurrent.boruvka.Edge;
 import edu.coursera.concurrent.boruvka.Component;
+import edu.coursera.concurrent.boruvka.Edge;
 
-import java.util.Queue;
-import java.util.List;
 import java.util.ArrayList;
+import java.util.List;
+import java.util.Queue;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * A parallel implementation of Boruvka's algorithm to compute a Minimum
@@ -28,7 +27,45 @@ public final class ParBoruvka extends AbstractBoruvka<ParBoruvka.ParComponent> {
     @Override
     public void computeBoruvka(final Queue<ParComponent> nodesLoaded,
             final SolutionToBoruvka<ParComponent> solution) {
-        throw new UnsupportedOperationException();
+        ParComponent n;
+
+        while ((n = nodesLoaded.poll()) != null) {
+            if (!n.lock.tryLock()) {
+                continue;
+            }
+
+            if (n.isDead) {
+                n.lock.unlock();
+                continue;
+            }
+
+            Edge<ParComponent> edge = n.getMinEdge();
+            if (edge == null) {
+                solution.setSolution(n);
+                break;
+            }
+
+            ParComponent other = edge.getOther(n);
+
+            if (!other.lock.tryLock()) {
+                n.lock.unlock();
+                nodesLoaded.add(n);
+                continue;
+            }
+
+            if (other.isDead) {
+                other.lock.unlock();
+                n.lock.unlock();
+                nodesLoaded.add(n);
+                continue;
+            }
+
+            other.isDead = true;
+            n.merge(other, edge.weight());
+            n.lock.unlock();
+            other.lock.unlock();
+            nodesLoaded.add(n);
+        }
     }
 
     /**
@@ -66,6 +103,8 @@ public final class ParBoruvka extends AbstractBoruvka<ParBoruvka.ParComponent> {
          * component.
          */
         public boolean isDead = false;
+
+        public final ReentrantLock lock = new ReentrantLock();
 
         /**
          * Constructor.
